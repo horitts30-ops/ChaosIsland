@@ -19,7 +19,7 @@ Every time you upload changed files to the repo, the site updates itself.
 3. Friends click **Multiplayer Lobbies**, type the code, and click **Join by code**.
 4. The host clicks **Deploy Everyone**. Friends click **Join Raid Now**.
 
-Up to 6 players share one island (same seed), see each other, and share kills, opened containers and doors. Everyone extracts and banks loot on their own. Progress is saved in each player's own browser (localStorage).
+Up to 6 players share one island (same seed), see each other, and share kills, opened containers and doors. Everyone extracts and banks loot on their own. Pick a username on the main menu or in the lobby screen. If two players use the same name, the later one is shown as `Name (2)`. Progress is saved in each player's own browser (localStorage).
 
 ## How the multiplayer works
 
@@ -27,9 +27,17 @@ Up to 6 players share one island (same seed), see each other, and share kills, o
 - `peerjs.min.js` is included in the repo, so there is no CDN dependency for it.
 - Enemies are simulated on each player's machine, so they can look slightly different between players.
 
+### If multiplayer or lobbies do not work
+
+Open **Multiplayer Lobbies** and click **Test connection**. It tells you whether the free PeerJS matchmaking server is reachable from your network.
+
+- "library did not load": `peerjs.min.js` was not uploaded next to `index.html`.
+- "could not reach the matchmaking server": the free PeerJS service is down or your network blocks it. Try another network or try again later.
+- "could not connect directly to the host": the matchmaking worked, but a network (school, work, mobile data, VPN) blocks peer-to-peer. A free public relay is configured as a fallback, but it is not guaranteed.
+
 ### Known limits
 
-- **Strict networks.** Some school, work or mobile-carrier networks block direct peer connections. No free relay (TURN) server is configured, so those players may fail to connect. Home Wi-Fi almost always works.
+- **Strict networks.** Some school, work or mobile-carrier networks block direct peer connections. A free public relay (OpenRelay) is configured as a fallback, but it is not guaranteed, so those players may still fail to connect. Home Wi-Fi almost always works.
 - **Public broker.** The free PeerJS broker has no uptime guarantee. If it is down, lobbies cannot be created.
 - **Host leaves = lobby closes.** Players in a raid keep playing, but without sharing.
 - No public lobby list (a static site has nowhere to store one). Share the code.

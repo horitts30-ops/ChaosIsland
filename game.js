@@ -1219,8 +1219,9 @@ const sheet=$('sheet'),card=$('card');
 mn.settings={particles:true,minimap:true,zoom:0};
 try{const s=JSON.parse(localStorage.getItem('ci_set')||'null');if(s)Object.assign(mn.settings,s)}catch(e){}
 mn.pack=prof.pack||null;
-function refreshProfile(){const r=M.rank(prof.stats.xp);$('prk').textContent=prof.name+'  Rank '+r.lv;$('pbk').textContent=prof.bank+' coins';$('psv').textContent=M.Save.mode==='account'?'Progress saved to your claude.ai account':'Progress saved in this browser only'}
+function refreshProfile(){const r=M.rank(prof.stats.xp);const mnm=$('mname');if(mnm&&document.activeElement!==mnm)mnm.value=prof.name==='Survivor'?'':prof.name;$('prk').textContent=prof.name+'  Rank '+r.lv;$('pbk').textContent=prof.bank+' coins';$('psv').textContent='Progress saved in this browser only'}
 mn.refresh=refreshProfile;
+{const nm=$('mname');if(nm){nm.value=prof.name==='Survivor'?'':prof.name;nm.oninput=()=>{const v=nm.value.replace(/[^A-Za-z0-9 _-]/g,'').slice(0,14);if(v!==nm.value)nm.value=v;prof.name=v.trim()||'Survivor';M.Save.write(prof);refreshProfile()}}}
 mn.close=()=>{sheet.classList.add('hidden');card.innerHTML='';card.classList.remove('wide');mn.cur=null;if(mn.afterClose){const f=mn.afterClose;mn.afterClose=null;f()}};
 mn.open=(name,arg)=>{mn.cur=name;card.classList.toggle('wide',name==='shop'||name==='prep'||name==='lobby'||name==='locker');SCREENS[name](arg);sheet.classList.remove('hidden');const b=card.querySelector('.main');if(b&&document.activeElement===document.body)b.focus({preventScroll:true})};
 const btn=(id,cls,label,fn)=>`<button class="${cls}" data-act="${id}">${label}</button>`;
@@ -1283,11 +1284,13 @@ if(!N.ok){card.innerHTML=`<h2>MULTIPLAYER LOBBIES</h2><p>The multiplayer library
 const info=()=>({name:prof.name,cls:M.CLASSES[prof.cls].name,outfit:M.outfit(prof)});
 if(!inLobby){
 card.innerHTML=`<h2>MULTIPLAYER LOBBIES</h2><p class="dim">Status: ${N.status()}. Create a lobby and send the 4-letter code to your friends, or type a friend's code below. Up to 6 players share one seeded island, see each other, and share kills, opened containers and doors. Everyone extracts and banks on their own.</p>
+<div class="opt"><span>Username</span><input class="tx" id="lnm" maxlength="14" placeholder="Pick a username" value="${esc(prof.name==='Survivor'?'':prof.name)}" style="width:170px"></div>
 <div class="btns" style="width:100%;flex-direction:row;flex-wrap:wrap">${btn('create','btn main','Create Lobby')}</div>
 <div class="opt"><input class="tx" id="jc" maxlength="4" placeholder="CODE" style="width:110px;text-transform:uppercase">${btn('joinc','sm buy','Join by code')}</div>
-<p class="warn" id="lerr">${esc(N.err||'')}</p><div class="btns" style="width:100%">${btn('close','btn','Back')}</div>`;
+<p class="warn" id="lerr">${esc(N.err||'')}</p><div class="btns" style="width:100%;flex-direction:row;flex-wrap:wrap">${btn('test','btn','Test connection')}${btn('close','btn','Back')}</div>`;
+const lnm=$('lnm');lnm.oninput=()=>{const v=lnm.value.replace(/[^A-Za-z0-9 _-]/g,'').slice(0,14);if(v!==lnm.value)lnm.value=v;prof.name=v.trim()||'Survivor';M.Save.write(prof);refreshProfile()};
 const go=async(fn)=>{if(N.busy)return;N.busy=true;N.err='';try{await fn()}catch(e){N.err=e.message||'Something went wrong.'}N.busy=false;if(mn.cur==='lobby')SCREENS.lobby()};
-bindActs({create:()=>go(async()=>{await N.create(info())}),joinc:()=>go(async()=>{const r=await N.join($('jc').value,info());if(r.running)ctx.startMP(N.seed)}),close:()=>mn.close()});
+bindActs({test:async()=>{if(N.busy)return;N.busy=true;const e=$('lerr');e.textContent='Testing connection to the matchmaking server...';const r=await N.test();N.busy=false;const e2=$('lerr');if(e2)e2.textContent=r.msg},create:()=>go(async()=>{await N.create(info())}),joinc:()=>go(async()=>{const r=await N.join($('jc').value,info());if(r.running)ctx.startMP(N.seed)}),close:()=>mn.close()});
 N.onChange=()=>{if(mn.cur==='lobby'&&!N.busy&&!document.activeElement.matches('input'))SCREENS.lobby()};return}
 const pl=N.players();
 card.innerHTML=`<h2>LOBBY ${esc(N.code)}</h2><p>Share this code with friends: <b style="font-size:22px;letter-spacing:.2em;color:var(--teal)">${esc(N.code)}</b><br><span class="dim">Island seed ${N.seed}. ${N.host?'You are the host.':'Waiting for the host to deploy.'}</span></p>

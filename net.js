@@ -17,7 +17,9 @@
 
   const PREFIX = 'chaosisland-v1-'; // change this if you fork the game so lobbies don't mix
   const MAX_PLAYERS = 6;
-  const CONNECT_TIMEOUT = 12000;
+  const CONNECT_TIMEOUT = 15000;   // reaching the matchmaking server
+  const PEER_TIMEOUT = 25000;      // direct connection to the host
+  const log = (...a) => { try { console.log('[net]', ...a); } catch (e) { } };
 
   const clean = s => String(s || '').replace(/[^A-Za-z0-9 _-]/g, '').trim().slice(0, 14) || 'Survivor';
   const rcode = () => { const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s = ''; for (let i = 0; i < 4; i++) s += a[(Math.random() * a.length) | 0]; return s; };
@@ -26,7 +28,16 @@
   // Optional: point at your own PeerJS server with ?peerhost=example.com&peerport=443&peersecure=1
   // (default is the free public PeerJS broker).
   function peerOptions() {
-    const o = { debug: 0 };
+    const o = {
+      debug: 0,
+      config: {
+        iceServers: [
+          { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:global.stun.twilio.com:3478'] },
+          // free public relay (used only if a direct connection is blocked)
+          { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' }
+        ]
+      }
+    };
     try {
       const q = new URLSearchParams(location.search);
       if (q.get('peerhost')) {
@@ -39,16 +50,26 @@
     return o;
   }
 
+  function friendly(e) {
+    const t = e && e.type;
+    if (t === 'unavailable-id') return 'That lobby code is already taken. Try again.';
+    if (t === 'peer-unavailable') return 'No host found for that code. Check it and try again.';
+    if (t === 'network' || t === 'server-error' || t === 'socket-error' || t === 'socket-closed') return 'Could not reach the PeerJS matchmaking server (' + t + '). It may be down, or your network blocks it.';
+    if (t === 'browser-incompatible') return 'This browser does not support WebRTC.';
+    return (e && e.message) || 'Connection problem.';
+  }
+
   // ---- open a PeerJS peer, resolve once registered with the broker ----
   function openPeer(id) {
     return new Promise((resolve, reject) => {
       let done = false;
       const peer = id ? new Peer(id, peerOptions()) : new Peer(peerOptions());
       const finish = (fn, v) => { if (done) return; done = true; clearTimeout(timer); fn(v); };
-      const timer = setTimeout(() => { try { peer.destroy(); } catch (e) { } finish(reject, new Error('Could not reach the matchmaking server. Check your connection and try again.')); }, CONNECT_TIMEOUT);
+      const timer = setTimeout(() => { try { peer.destroy(); } catch (e) { } finish(reject, new Error('Could not reach the matchmaking server (timed out). Check your internet connection, or try another network.')); }, CONNECT_TIMEOUT);
       peer.on('open', () => finish(resolve, peer));
       peer.on('error', err => {
-        if (!done) { try { peer.destroy(); } catch (e) { } finish(reject, err); }
+        log('peer error', err && err.type, err && err.message);
+        if (!done) { try { peer.destroy(); } catch (e) { } err.friendly = friendly(err); finish(reject, err); }
       });
     });
   }
@@ -164,11 +185,19 @@
   // ---- public API (same shape the game already used) ----
   Net.init = async function () { Net.ok = typeof Peer !== 'undefined'; };
   Net.status = () => !Net.ok ? 'unavailable' : (Net.room ? (Net.room.connected() ? 'online' : 'reconnecting') : 'ready');
+  Net.test = async function () {
+    if (!Net.ok) return { ok: false, msg: 'Multiplayer library (peerjs.min.js) did not load. Make sure the file is uploaded next to index.html.' };
+    try { const p = await openPeer(); try { p.destroy(); } catch (e) { } return { ok: true, msg: 'Matchmaking server reachable. If joining still fails, a network is blocking direct connections.' }; }
+    catch (e) { return { ok: false, msg: (e && (e.friendly || e.message)) || 'Failed.' }; }
+  };
+  // make duplicate usernames distinguishable: Bob, Bob (2)
+  const uniq = list => { const seen = {}; return list.map(x => { const k = x.toLowerCase(); seen[k] = (seen[k] || 0) + 1; return seen[k] > 1 ? x + ' (' + seen[k] + ')' : x; }); };
   Net.lobbies = () => []; // no public lobby list on a static site: share the 4-letter code instead
   Net.advertise = () => { };
   Net.players = function () {
     if (!Net.room) return [];
-    return Net.room.peers().map(p => ({ peer: p.peer, me: p.isMe, name: p.presence.n || 'Survivor', cls: p.presence.cls || '', host: !!p.presence.host, st: p.presence.st || 'lobby' }));
+    const ps = Net.room.peers(); const names = uniq(ps.map(p => p.presence.n || 'Survivor'));
+    return ps.map((p, i) => ({ peer: p.peer, me: p.isMe, name: names[i], cls: p.presence.cls || '', host: !!p.presence.host, st: p.presence.st || 'lobby' }));
   };
 
   function wire(room, code, host, info) {
@@ -196,7 +225,7 @@
       try { peer = await openPeer(PREFIX + code); }
       catch (e) { lastErr = e; if (!(e && e.type === 'unavailable-id')) break; }
     }
-    if (!peer) throw new Error(lastErr && lastErr.message ? lastErr.message : 'Could not create a lobby.');
+    if (!peer) throw new Error(lastErr ? (lastErr.friendly || lastErr.message) : 'Could not create a lobby.');
     Net.seed = (Math.random() * 4294967295) >>> 0;
     const room = makeRoom(peer, true);
     wire(room, code, true, info);
@@ -210,13 +239,13 @@
     if (code.length !== 4) throw new Error('Enter the 4-character lobby code.');
     if (Net.room) await Net.leave();
     let peer;
-    try { peer = await openPeer(); } catch (e) { throw new Error(e && e.message ? e.message : 'Could not reach the matchmaking server.'); }
+    try { peer = await openPeer(); } catch (e) { throw new Error((e && (e.friendly || e.message)) || 'Could not reach the matchmaking server.'); }
     const room = makeRoom(peer, false);
     try {
       await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('No host found for that code. Check it and try again.')), CONNECT_TIMEOUT);
+        const timer = setTimeout(() => reject(new Error('Found the lobby but could not connect directly to the host. One of your networks (school, work, mobile data, VPN) may block peer-to-peer. Try another network.')), PEER_TIMEOUT);
         const fail = e => { clearTimeout(timer); reject(e); };
-        peer.on('error', e => fail(e && e.type === 'peer-unavailable' ? new Error('No host found for that code. Check it and try again.') : new Error('Connection failed: ' + ((e && e.type) || 'unknown'))));
+        peer.on('error', e => fail(e && e.type === 'peer-unavailable' ? new Error('No host found for that code. Check it and try again.') : new Error(friendly(e))));
         const conn = peer.connect(PREFIX + code, { reliable: true, serialization: 'json' });
         room.attachClient(conn, () => { clearTimeout(timer); resolve(); });
         conn.on('error', () => fail(new Error('Connection to the host failed.')));
@@ -244,11 +273,13 @@
   Net.remotePlayers = function () {
     if (!Net.room) return [];
     const out = [];
-    for (const p of Net.room.peers()) {
+    const all = Net.room.peers(); const names = uniq(all.map(p => p.presence.n || 'Survivor'));
+    for (let i = 0; i < all.length; i++) {
+      const p = all[i];
       if (p.isMe) continue;
       const q = p.presence;
       if (q.st !== 'run' || typeof q.x !== 'number') continue;
-      out.push({ x: q.x, y: q.y, dir: q.d | 0, frame: q.f | 0, name: q.n || 'Survivor', sheet: CI.sheetFor(q.o || { skin: 0, hair: 1, shirt: 3, style: 0 }) });
+      out.push({ x: q.x, y: q.y, dir: q.d | 0, frame: q.f | 0, name: names[i], sheet: CI.sheetFor(q.o || { skin: 0, hair: 1, shirt: 3, style: 0 }) });
     }
     return out;
   };
